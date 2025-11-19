@@ -2,6 +2,11 @@
 #ifndef GAUSSIAN_SPLATTING_HLSL
 #define GAUSSIAN_SPLATTING_HLSL
 
+// --- Distance-based opacity scaling parameters ---
+float _UseDistanceFade; 	// 거리 기반 보정 사용 여부 
+float _FarFade; 			// 거리 감쇠 계수
+float _NearPlane; 			// 카메라 근평면 (깊이 기준점) 
+
 float InvSquareCentered01(float x)
 {
     x -= 0.5;
@@ -53,7 +58,7 @@ void CalcCovariance3D(float3x3 rotMat, out float3 sigma0, out float3 sigma1)
 }
 
 // from "EWA Splatting" (Zwicker et al 2002) eq. 31
-float3 CalcCovariance2D(float3 worldPos, float3 cov3d0, float3 cov3d1, float4x4 matrixV, float4x4 matrixP, float4 screenParams)
+float3 CalcCovariance2D(float3 worldPos, float3 cov3d0, float3 cov3d1, float4x4 matrixV, float4x4 matrixP, float4 screenParams) // 공분산
 {
     float4x4 viewMatrix = matrixV;
     float3 viewPos = mul(viewMatrix, float4(worldPos, 1)).xyz;
@@ -208,7 +213,7 @@ static const uint kChunkSize = 256;
 
 struct SplatData
 {
-    float3 pos;
+    float3 pos; 
     float4 rot;
     float3 scale;
     half opacity;
@@ -460,9 +465,9 @@ SplatData LoadSplatData(uint idx)
 
 
     // load raw splat data, which might be chunk-relative
-    s.pos       = LoadSplatPosValue(idx);
-    s.rot       = DecodeRotation(DecodePacked_10_10_10_2(LoadUInt(_SplatOther, otherAddr)));
-    s.scale     = LoadAndDecodeVector(_SplatOther, otherAddr + 4, scaleFmt);
+    s.pos       = LoadSplatPosValue(idx); // 위치 
+    s.rot       = DecodeRotation(DecodePacked_10_10_10_2(LoadUInt(_SplatOther, otherAddr))); // 회전 
+    s.scale     = LoadAndDecodeVector(_SplatOther, otherAddr + 4, scaleFmt); // 크긴 
     half4 col   = LoadSplatColTex(coord);
 
     uint shIndex = idx;
@@ -633,3 +638,4 @@ void FlipProjectionIfBackbuffer(inout float4 vpos)
 }
 
 #endif // GAUSSIAN_SPLATTING_HLSL
+

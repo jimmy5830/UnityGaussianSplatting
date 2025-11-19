@@ -1,0 +1,86 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+cbuffer _TileCullParams
+{
+    uint    _TileSize;            // e.g., 16
+    float   _CullEpsilon;         // e.g., 1e-4  (threshold on exp(-0.5*d2))
+    float4  _ScreenSize;          // (W, H, 1/W, 1/H)
+    float4x4 _View;
+    float4x4 _Proj;
+}
+
+StructuredBuffer<float4> _SplatPosScale;  // xyz = mu_w, w = scale proxy (radius/sigma)
+StructuredBuffer<uint>   _SplatIndices;   // global candidate list (post coarse bin/sort)
+StructuredBuffer<uint2>  _TileRanges;     // per-tile (start, count) into _SplatIndices
+
+// Output flags (1 = keep, 0 = cull), same length as _SplatIndices
+RWStructuredBuffer<uint> _KeepFlags;
+
+float2 worldToPixel(float3 mu_w, out float viewZ)
+{
+    float4 v = mul(_View, float4(mu_w,1));
+    float4 c = mul(_Proj, v);
+    viewZ = v.z;
+    float2 ndc = c.xy / max(c.w, 1e-6);
+    float2 pix = (ndc * 0.5 + 0.5) * _ScreenSize.xy;
+    return pix;
+}
+
+// Simple screen-space sigma from world scale proxy and view depth.
+// Assumes symmetric footprint; robust enough for culling decisions.
+float sigma_screen(float scaleProxy, float viewZ)
+{
+    // Projected meters-to-pixels scale ≈ f / -z; fold into sigma ~ scaleProxy * f / -z
+    // Use fx ~= 1/_Proj[0][0] mapping; in clip: proj[0][0] = 2f/W, so f ≈ W/(2*proj00)
+    float proj00 = _Proj[0][0];
+    float fx = (_ScreenSize.x) / max(2.0 * proj00, 1e-6);
+    float s = scaleProxy * fx / max(-viewZ, 1e-3);
+    // Clamp to avoid zero / exploding
+    return clamp(s, 0.5, 2048.0);
+}
+
+// Compute maximum contribution inside tile by Mahalanobis distance to clamped point.
+// Using diagonal covariance: A = diag(1/sx^2, 1/sy^2). With sx=sy=sigma_screen.
+float peak_value_in_tile(float2 m_pix, float sigma, uint2 tileXY)
+{
+    float2 tileMin = float2(tileXY) * _TileSize;
+    float2 tileMax = tileMin + _TileSize;
+    // Closest point x_hat to m_pix within axis-aligned rectangle
+    float2 xhat = clamp(m_pix, tileMin, tileMax);
+    float2 d = (xhat - m_pix) / max(sigma, 1e-3);
+    float d2 = dot(d, d); // (dx/s)^2 + (dy/s)^2
+    // Gaussian peak value at x_hat (unnormalized, relative): exp(-0.5 * d2)
+    return exp(-0.5 * d2);
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    uint tile = id.x;
+    uint2 range = _TileRanges[tile];
+    uint start = range.x;
+    uint count = range.y;
+    if (count == 0) return;
+
+    // Compute tile coords (integer) from tile index
+    uint tilesX = (uint)ceil(_ScreenSize.x / _TileSize);
+    uint tileX = tile % tilesX;
+    uint tileY = tile / tilesX;
+    uint2 tileXY = uint2(tileX, tileY);
+
+    // Stride loop: one thread processes multiple entries
+    for (uint i = id.y; i < count; i += 1) { // id.y fixed 0 in this layout
+        uint idx = start + i;
+        uint splat = _SplatIndices[idx];
+
+        float viewZ;
+        float2 m_pix = worldToPixel(_SplatPosScale[splat].xyz, viewZ);
+        float sigma = sigma_screen(_SplatPosScale[splat].w, viewZ);
+
+        float peak = peak_value_in_tile(m_pix, sigma, tileXY);
+        _KeepFlags[idx] = (peak >= _CullEpsilon) ? 1u : 0u;
+    }
+}

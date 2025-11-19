@@ -1,0 +1,63 @@
+
+=== GaussianSplatRenderer_StopThePop_TileCull.diff.txt ===
+
+[1] Serialized params (add near StopThePop params)
+---------------------------------------------------
+[SerializeField, Range(1e-6f, 1e-2f)] float m_CullEpsilon = 1e-4f;
+[SerializeField] ComputeShader m_CSTileCull;
+
+[2] Buffers
+-----------
+GraphicsBuffer m_GpuKeepFlags; // uint per candidate in m_GpuSortKeys (or your tile list)
+
+[3] Property IDs
+----------------
+static readonly int ID_CullEpsilon    = Shader.PropertyToID("_CullEpsilon");
+static readonly int ID_KeepFlags      = Shader.PropertyToID("_KeepFlags");
+
+[4] Resource creation
+---------------------
+m_GpuKeepFlags = new GraphicsBuffer(GraphicsBuffer.Target.Structured, m_GpuSortKeys.count, 4);
+
+[5] Bind & dispatch (after CalcViewData, before Sort/Draw)
+----------------------------------------------------------
+void DispatchTileCull(CommandBuffer cmd, Camera cam, int tilesX, int tilesY, int tileCount)
+{
+    if (m_CSTileCull == null) return;
+    int k = m_CSTileCull.FindKernel("CS_TileCull");
+
+    Vector4 screen = new Vector4(Screen.width, Screen.height, 1.0f/Screen.width, 1.0f/Screen.height);
+    cmd.SetComputeIntParam(m_CSTileCull, ID_TileSize, m_TileSize);
+    cmd.SetComputeFloatParam(m_CSTileCull, ID_CullEpsilon, m_CullEpsilon);
+    cmd.SetComputeVectorParam(m_CSTileCull, ID_ScreenSize, screen);
+    cmd.SetComputeMatrixParam(m_CSTileCull, ID_View, cam.worldToCameraMatrix);
+    cmd.SetComputeMatrixParam(m_CSTileCull, ID_Proj, GL.GetGPUProjectionMatrix(cam.projectionMatrix, true));
+
+    // Inputs
+    cmd.SetComputeBufferParam(m_CSTileCull, k, ID_SplatPosScale, m_GpuPosData);
+    cmd.SetComputeBufferParam(m_CSTileCull, k, ID_SplatIndices, m_GpuSortKeys);
+    cmd.SetComputeBufferParam(m_CSTileCull, k, ID_TileRanges, m_GpuTileRanges);
+
+    // Output
+    cmd.SetComputeBufferParam(m_CSTileCull, k, ID_KeepFlags, m_GpuKeepFlags);
+
+    int groups = Mathf.CeilToInt(tileCount / 64.0f);
+    cmd.DispatchCompute(m_CSTileCull, k, groups, 1, 1);
+}
+
+[6] Use KeepFlags to filter the tile lists (lightweight path)
+--------------------------------------------------------------
+/*
+Option A: KeepFlags-aware draw
+- In your draw path, pass KeepFlags to the vertex/geometry (or compute) to discard instances with flag==0.
+  e.g., in material property block: SetBuffer("_KeepFlags", m_GpuKeepFlags);
+  And in shader: if (_KeepFlags[instanceID]==0) discard / alpha=0.
+- This avoids compaction but keeps indices stable; cost: some wasted instances culled in shader.
+
+Option B: Compaction (faster draw)
+- Add a compute prefix-sum + scatter pass to build a compacted index list per tile using _KeepFlags.
+- Replace m_GpuSortKeys subsets with the compacted list for DrawProcedural.
+*/
+[7] Release
+-----------
+m_GpuKeepFlags?.Dispose(); m_GpuKeepFlags = null;

@@ -143,10 +143,17 @@ namespace GaussianSplatting.Runtime
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatScale, gs.m_SplatScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatOpacityScale, gs.m_OpacityScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatSize, gs.m_PointDisplaySize);
+                
+                // Added code
+                mpb.SetFloat(GaussianSplatRenderer.Props.DistanceFade, gs.m_UseDistanceFade);
+                mpb.SetFloat(GaussianSplatRenderer.Props.FarFade, gs.m_FarFade);
+                mpb.SetFloat(GaussianSplatRenderer.Props.NearPlane, gs.m_NearPlane);
+                
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOrder, gs.m_SHOrder);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayIndex, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugPointIndices ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayChunks, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds ? 1 : 0);
+                
 
                 cmb.BeginSample(s_ProfCalcView);
                 gs.CalcViewData(cmb, cam);
@@ -231,12 +238,26 @@ namespace GaussianSplatting.Runtime
         [Range(0.05f, 20.0f)]
         [Tooltip("Additional scaling factor for opacity")]
         public float m_OpacityScale = 1.0f;
+
+        [Range(0.0f, 1.0f)] [Tooltip("diatance fade activate")]
+        public float m_UseDistanceFade = 1.0f;
+
+        [Range(0.002f, 0.008f)] [Tooltip("Fade strenght")]
+        public float m_FarFade = 0.002f;
+
+        [Range(0.0f, 1.0f)] [Tooltip("near plane")]
+        public float m_NearPlane = 0.01f;
+        
+            
+        
         [Range(0, 3)] [Tooltip("Spherical Harmonics order to use")]
         public int m_SHOrder = 3;
         [Tooltip("Show only Spherical Harmonics contribution, using gray color")]
         public bool m_SHOnly;
         [Range(1,30)] [Tooltip("Sort splats only every N frames")]
         public int m_SortNthFrame = 1;
+        
+        
 
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
@@ -328,6 +349,9 @@ namespace GaussianSplatting.Runtime
             public static readonly int SelectionMode = Shader.PropertyToID("_SelectionMode");
             public static readonly int SplatPosMouseDown = Shader.PropertyToID("_SplatPosMouseDown");
             public static readonly int SplatOtherMouseDown = Shader.PropertyToID("_SplatOtherMouseDown");
+            public static readonly int DistanceFade = Shader.PropertyToID("_DistanceFade");
+            public static readonly int FarFade =  Shader.PropertyToID("_FarFade");
+            public static readonly int NearPlane =  Shader.PropertyToID("_NearPlane");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }

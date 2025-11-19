@@ -99,6 +99,15 @@ half4 frag (v2f i) : SV_Target
 		}
 		i.col.rgb = lerp(i.col.rgb, selectedColor, 0.5);
 	}
+
+	// --- Distance-based opacity scaling ---
+    // 전역 변수로 선언되어 있어야 함:
+    float _UseDistanceFade;
+    float _FarFade;
+    float _NearPlane;
+    float depth = i.vertex.z / max(1e-6, i.vertex.w);
+    float fade  = exp(-_FarFade * max(0.0, depth - _NearPlane));
+    alpha *= lerp(1.0, fade, saturate(_UseDistanceFade));
 	
     if (alpha < 1.0/255.0)
         discard;

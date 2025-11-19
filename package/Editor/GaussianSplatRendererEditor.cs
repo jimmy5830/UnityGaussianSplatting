@@ -35,6 +35,7 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropShaderDebugPoints;
         SerializedProperty m_PropShaderDebugBoxes;
         SerializedProperty m_PropCSSplatUtilities;
+        
 
         bool m_ResourcesExpanded = false;
         int m_CameraIndex = 0;
@@ -103,6 +104,8 @@ namespace GaussianSplatting.Editor
                 EditorGUILayout.HelpBox(msg, MessageType.Error);
             }
 
+            // Editor에서 Render Options 변경란 
+            
             EditorGUILayout.Space();
             GUILayout.Label("Render Options", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_PropRenderOrder);

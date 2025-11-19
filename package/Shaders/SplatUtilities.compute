@@ -88,6 +88,7 @@ float _SplatOpacityScale;
 uint _SHOrder;
 uint _SHOnly;
 
+
 uint _SplatCutoutsCount;
 
 #define SPLAT_CUTOUT_TYPE_ELLIPSOID 0
