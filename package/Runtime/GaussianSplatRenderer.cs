@@ -144,10 +144,16 @@ namespace GaussianSplatting.Runtime
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatOpacityScale, gs.m_OpacityScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatSize, gs.m_PointDisplaySize);
                 
-                // Added code
+                // Distance-based fade opacity calculate 코드 
                 mpb.SetFloat(GaussianSplatRenderer.Props.DistanceFade, gs.m_UseDistanceFade);
                 mpb.SetFloat(GaussianSplatRenderer.Props.FarFade, gs.m_FarFade);
                 mpb.SetFloat(GaussianSplatRenderer.Props.NearPlane, gs.m_NearPlane);
+                
+                // 새로 추가
+                mpb.SetFloat(GaussianSplatRenderer.Props.DepthBoostStart, gs.m_DepthBoostStart);
+                mpb.SetFloat(GaussianSplatRenderer.Props.DepthBoostEnd,   gs.m_DepthBoostEnd);
+                mpb.SetFloat(GaussianSplatRenderer.Props.FarOpacityBoost, gs.m_FarOpacityBoost);
+                mpb.SetFloat(GaussianSplatRenderer.Props.UseDistanceBoost, gs.m_UseDistanceBoost);
                 
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOrder, gs.m_SHOrder);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
@@ -247,6 +253,16 @@ namespace GaussianSplatting.Runtime
 
         [Range(0.0f, 1.0f)] [Tooltip("near plane")]
         public float m_NearPlane = 0.01f;
+        
+        // --- 추가: 클래스 멤버로 인스펙터용 변수들 추가 (원하는 기본값/Range/Tooltip 조정 가능) ---
+        [Range(0.0f, 100.0f)] [Tooltip("Depth at which opacity boost starts (object space or view depth depending on shader)")]
+        public float m_DepthBoostStart = 10.0f;
+        [Range(0.0f, 1000.0f)] [Tooltip("Depth at which opacity boost ends")]
+        public float m_DepthBoostEnd = 50.0f;
+        [Range(0.0f, 5.0f)] [Tooltip("Multiplier applied to opacity in far areas")]
+        public float m_FarOpacityBoost = 1.0f;
+        [Range(0.0f, 1.0f)] [Tooltip("Enable/disable distance-based opacity boost")]
+        public float m_UseDistanceBoost = 0.0f; // 0 = off, 1 = on
         
             
         
@@ -352,6 +368,12 @@ namespace GaussianSplatting.Runtime
             public static readonly int DistanceFade = Shader.PropertyToID("_DistanceFade");
             public static readonly int FarFade =  Shader.PropertyToID("_FarFade");
             public static readonly int NearPlane =  Shader.PropertyToID("_NearPlane");
+            
+            // 새로 추가하는 항목_opacity scalling_12.3
+            public static readonly int DepthBoostStart = Shader.PropertyToID("_DepthBoostStart");
+            public static readonly int DepthBoostEnd = Shader.PropertyToID("_DepthBoostEnd");
+            public static readonly int FarOpacityBoost = Shader.PropertyToID("_FarOpacityBoost");
+            public static readonly int UseDistanceBoost = Shader.PropertyToID("_UseDistanceBoost");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -527,6 +549,12 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(cs, Props.SplatFormat, (int)format);
             cmb.SetComputeIntParam(cs, Props.SplatCount, m_SplatCount);
             cmb.SetComputeIntParam(cs, Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
+            
+            // 새로 추가: compute shader에 전달 12.3
+            cmb.SetComputeFloatParam(cs, Props.DepthBoostStart, m_DepthBoostStart);
+            cmb.SetComputeFloatParam(cs, Props.DepthBoostEnd, m_DepthBoostEnd);
+            cmb.SetComputeFloatParam(cs, Props.FarOpacityBoost, m_FarOpacityBoost);
+            cmb.SetComputeIntParam(cs, Props.UseDistanceBoost, m_UseDistanceBoost != 0.0f ? 1 : 0);
 
             UpdateCutoutsBuffer();
             cmb.SetComputeIntParam(cs, Props.SplatCutoutsCount, m_Cutouts?.Length ?? 0);
@@ -546,6 +574,12 @@ namespace GaussianSplatting.Runtime
             mat.SetInteger(Props.SplatFormat, (int)format);
             mat.SetInteger(Props.SplatCount, m_SplatCount);
             mat.SetInteger(Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
+            
+            // 새로 추가
+            mat.SetFloat(Props.DepthBoostStart, m_DepthBoostStart);
+            mat.SetFloat(Props.DepthBoostEnd, m_DepthBoostEnd);
+            mat.SetFloat(Props.FarOpacityBoost, m_FarOpacityBoost);
+            mat.SetFloat(Props.UseDistanceBoost, m_UseDistanceBoost);
         }
 
         static void DisposeBuffer(ref GraphicsBuffer buf)
@@ -628,7 +662,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
-
+            
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcViewData, out uint gsX, out _, out _);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcViewData, (m_GpuView.count + (int)gsX - 1)/(int)gsX, 1, 1);
         }

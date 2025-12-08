@@ -78,43 +78,56 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 
 half4 frag (v2f i) : SV_Target
 {
-	float power = -dot(i.pos, i.pos);
-	half alpha = exp(power);
-	if (i.col.a >= 0)
-	{
-		alpha = saturate(alpha * i.col.a);
-	}
-	else
-	{
-		// "selected" splat: magenta outline, increase opacity, magenta tint
-		half3 selectedColor = half3(1,0,1);
-		if (alpha > 7.0/255.0)
-		{
-			if (alpha < 10.0/255.0)
-			{
-				alpha = 1;
-				i.col.rgb = selectedColor;
-			}
-			alpha = saturate(alpha + 0.3);
-		}
-		i.col.rgb = lerp(i.col.rgb, selectedColor, 0.5);
-	}
+    float power = -dot(i.pos, i.pos);
+    half alpha = exp(power);
 
-	// --- Distance-based opacity scaling ---
-    // 전역 변수로 선언되어 있어야 함:
-    float _UseDistanceFade;
-    float _FarFade;
-    float _NearPlane;
+    if (i.col.a >= 0)
+    {
+        alpha = saturate(alpha * i.col.a);
+    }
+    else
+    {
+        // "selected" splat: magenta outline, increase opacity, magenta tint
+        half3 selectedColor = half3(1,0,1);
+        if (alpha > 7.0/255.0)
+        {
+            if (alpha < 10.0/255.0)
+            {
+                alpha = 1;
+                i.col.rgb = selectedColor;
+            }
+            alpha = saturate(alpha + 0.3);
+        }
+        i.col.rgb = lerp(i.col.rgb, selectedColor, 0.5);
+    }
+
+    // 1단계: 기존 거리 감쇠 (원하는 대로 유지 또는 약하게)
     float depth = i.vertex.z / max(1e-6, i.vertex.w);
     float fade  = exp(-_FarFade * max(0.0, depth - _NearPlane));
     alpha *= lerp(1.0, fade, saturate(_UseDistanceFade));
-	
+
+    // 2단계: 먼 거리일수록 알파 부스트
+    // depth가 _DepthBoostStart ~ _DepthBoostEnd 사이일 때 0~1로 정규화
+    float t = 0.0;
+    float range = max(1e-6, _DepthBoostEnd - _DepthBoostStart);
+    t = (depth - _DepthBoostStart) / range;
+    t = saturate(t);             // 0~1로 clamp
+
+    // t=0 이면 1배, t=1 이면 _FarOpacityBoost 배
+    float boost = lerp(1.0, _FarOpacityBoost, t);
+
+    // _UseDistanceBoost 로 전체 강도 조절
+    float boostFinal = lerp(1.0, boost, saturate(_UseDistanceBoost));
+    alpha *= boostFinal;
+
     if (alpha < 1.0/255.0)
         discard;
 
     half4 res = half4(i.col.rgb * alpha, alpha);
     return res;
 }
+
+
 ENDCG
         }
     }

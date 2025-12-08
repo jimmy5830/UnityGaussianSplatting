@@ -5,7 +5,13 @@
 // --- Distance-based opacity scaling parameters ---
 float _UseDistanceFade; 	// 거리 기반 보정 사용 여부 
 float _FarFade; 			// 거리 감쇠 계수
-float _NearPlane; 			// 카메라 근평면 (깊이 기준점) 
+float _NearPlane; 			// 카메라 근평면 (깊이 기준점)
+
+// 먼 거리에서 알파 부스트용
+float _DepthBoostStart;    // 이 깊이부터 효과 시작
+float _DepthBoostEnd;      // 이 깊이에서 효과 최대
+float _FarOpacityBoost;    // 먼 거리에서 최대 몇 배까지 키울지 (1이면 부스트 없음)
+float _UseDistanceBoost;   // 0~1, 부스트 강도
 
 float InvSquareCentered01(float x)
 {
@@ -635,6 +641,64 @@ void FlipProjectionIfBackbuffer(inout float4 vpos)
 {
     if (_CameraTargetTexture_TexelSize.z == 1.0)
         vpos.y = -vpos.y;
+}
+
+// 픽셀 단위 local resorting window용 샘플
+struct PixelSample
+{
+    float depth;   // 이 샘플의 depth(지금은 일단 center depth 재사용)
+    float3 color;  // premultiplied or straight, 기존 코드에 맞춰 사용
+    float  alpha;  // opacity
+};
+
+// front-to-back 블렌딩
+void BlendFront(inout float3 accumColor, inout float accumAlpha,
+                float3 srcColor, float srcAlpha)
+{
+    float oneMinusA = 1.0 - accumAlpha;
+    float a = srcAlpha * oneMinusA;
+    accumColor += srcColor * a;
+    accumAlpha += a;
+}
+
+// PixelSample window에 새 샘플을 depth 순서에 맞게 삽입
+void InsertSampleIntoWindow(
+    inout PixelSample window[16],
+    inout int windowCount,
+    PixelSample s)
+{
+    int insertIdx = windowCount;
+    [loop]
+    while (insertIdx > 0 && window[insertIdx - 1].depth > s.depth)
+    {
+        window[insertIdx] = window[insertIdx - 1];
+        insertIdx--;
+    }
+    window[insertIdx] = s;
+    windowCount++;
+}
+
+// window가 가득 찼을 때, 가장 앞(카메라에 가까운) 샘플 하나 꺼내 블렌딩
+void FlushNearestFromWindow(
+    inout PixelSample window[16],
+    inout int windowCount,
+    inout float3 accumColor,
+    inout float accumAlpha)
+{
+    if (windowCount == 0)
+        return;
+
+    // depth가 이미 정렬되어 있으니 0번이 가장 앞
+    PixelSample nearest = window[0];
+
+    BlendFront(accumColor, accumAlpha, nearest.color, nearest.alpha);
+
+    // 앞으로 당기기
+    [loop]
+    for (int i = 0; i < windowCount - 1; ++i)
+        window[i] = window[i + 1];
+
+    windowCount--;
 }
 
 #endif // GAUSSIAN_SPLATTING_HLSL
