@@ -8,7 +8,7 @@ public class AutoCapture : MonoBehaviour
 
     void Update()
     {
-        if (Input.GetKeyDown(captureKey))
+        if (Input.GetKeyDown(captureKey))1
         {
             StartCoroutine(Capture());
         }

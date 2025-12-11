@@ -227,6 +227,12 @@ namespace GaussianSplatting.Runtime
     [ExecuteInEditMode]
     public class GaussianSplatRenderer : MonoBehaviour
     {
+        public enum SortMode
+        {
+            Global, // 기존 sorting
+            PerTile // StopThePop Acting 
+        }
+        
         public enum RenderMode
         {
             Splats,
@@ -263,9 +269,7 @@ namespace GaussianSplatting.Runtime
         public float m_FarOpacityBoost = 1.0f;
         [Range(0.0f, 1.0f)] [Tooltip("Enable/disable distance-based opacity boost")]
         public float m_UseDistanceBoost = 0.0f; // 0 = off, 1 = on
-        
-            
-        
+     
         [Range(0, 3)] [Tooltip("Spherical Harmonics order to use")]
         public int m_SHOrder = 3;
         [Tooltip("Show only Spherical Harmonics contribution, using gray color")]
@@ -273,8 +277,13 @@ namespace GaussianSplatting.Runtime
         [Range(1,30)] [Tooltip("Sort splats only every N frames")]
         public int m_SortNthFrame = 1;
         
-        
+        // Per-tile sorting 변수
+        [Header("Sorting")]
+        public SortMode m_SortMode = SortMode.Global;
 
+        [Tooltip("스크린 공간 타일 크기 (픽셀 단위). 예: 16 또는 32")]
+        public int m_TileSize = 16;
+   
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
@@ -374,6 +383,10 @@ namespace GaussianSplatting.Runtime
             public static readonly int DepthBoostEnd = Shader.PropertyToID("_DepthBoostEnd");
             public static readonly int FarOpacityBoost = Shader.PropertyToID("_FarOpacityBoost");
             public static readonly int UseDistanceBoost = Shader.PropertyToID("_UseDistanceBoost");
+            
+            // 좆같다
+            public static readonly int SortMode = Shader.PropertyToID("_SortMode");
+            public static readonly int TileSize = Shader.PropertyToID("_TileSize");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -550,6 +563,10 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(cs, Props.SplatCount, m_SplatCount);
             cmb.SetComputeIntParam(cs, Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
             
+            // 개좆같다
+            cmb.SetComputeIntParam(cs, Props.SortMode, (int)m_SortMode);
+            cmb.SetComputeIntParam(cs, Props.TileSize, m_TileSize);
+            
             // 새로 추가: compute shader에 전달 12.3
             cmb.SetComputeFloatParam(cs, Props.DepthBoostStart, m_DepthBoostStart);
             cmb.SetComputeFloatParam(cs, Props.DepthBoostEnd, m_DepthBoostEnd);
@@ -574,6 +591,10 @@ namespace GaussianSplatting.Runtime
             mat.SetInteger(Props.SplatFormat, (int)format);
             mat.SetInteger(Props.SplatCount, m_SplatCount);
             mat.SetInteger(Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
+            
+            // 좆같다
+            mat.SetInteger(Props.SortMode, (int)m_SortMode);
+            mat.SetInteger(Props.TileSize, m_TileSize);
             
             // 새로 추가
             mat.SetFloat(Props.DepthBoostStart, m_DepthBoostStart);
