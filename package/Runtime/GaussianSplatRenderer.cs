@@ -298,7 +298,12 @@ namespace GaussianSplatting.Runtime
         internal bool m_GpuChunksValid;
         internal GraphicsBuffer m_GpuView;
         internal GraphicsBuffer m_GpuIndexBuffer;
-
+        GraphicsBuffer m_GpuPrevSortKeys;
+   
+        [Range(1, 64)]
+        [SerializeField]
+        int m_LocalWindowSize = 8;  // Inspector에서 조절 가능한 window 크기
+        
         // these buffers are only for splat editing, and are lazily created
         GraphicsBuffer m_GpuEditCutouts;
         GraphicsBuffer m_GpuEditCountsBounds;
@@ -374,6 +379,10 @@ namespace GaussianSplatting.Runtime
             public static readonly int DepthBoostEnd = Shader.PropertyToID("_DepthBoostEnd");
             public static readonly int FarOpacityBoost = Shader.PropertyToID("_FarOpacityBoost");
             public static readonly int UseDistanceBoost = Shader.PropertyToID("_UseDistanceBoost");
+            
+            // 더 추가하는 항목 PrevOrderBuffer, LocalResortWindow
+            public static readonly int PrevOrderBuffer = Shader.PropertyToID("_PrevOrderBuffer");
+            public static readonly int LocalWindowSize = Shader.PropertyToID("_LocalWindowSize");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -402,6 +411,7 @@ namespace GaussianSplatting.Runtime
             ScaleSelection,
             ExportData,
             CopySplats,
+            LocalResortWindow,
         }
 
         public bool HasValidAsset =>
@@ -472,22 +482,35 @@ namespace GaussianSplatting.Runtime
             m_GpuSortKeys?.Dispose();
             m_SorterArgs.resources.Dispose();
 
-            EnsureSorterAndRegister();
+            EnsureSorterAndRegister(); // Register는 필요하면 남겨두되, 정렬용 sorter는 더 이상 안 씀
 
             m_GpuSortDistances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4) { name = "GaussianSplatSortDistances" };
             m_GpuSortKeys = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4) { name = "GaussianSplatSortIndices" };
 
+            
+            // 이전 프레임 정렬 인덱스
+            m_GpuPosData?.Dispose();
+            m_GpuPrevSortKeys = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, 4)
+            {
+                name = "GaussianSplatPrevSortIndices"
+            };
+            
             // init keys buffer to splat indices
             m_CSSplatUtilities.SetBuffer((int)KernelIndices.SetIndices, Props.SplatSortKeys, m_GpuSortKeys);
             m_CSSplatUtilities.SetInt(Props.SplatCount, m_GpuSortDistances.count);
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.SetIndices, out uint gsX, out _, out _);
             m_CSSplatUtilities.Dispatch((int)KernelIndices.SetIndices, (m_GpuSortDistances.count + (int)gsX - 1)/(int)gsX, 1, 1);
 
+            // Prevsortkeys 도 초기값으로 시작 
+            Graphics.CopyBuffer(m_GpuSortKeys, m_GpuPrevSortKeys);
+            
             m_SorterArgs.inputKeys = m_GpuSortDistances;
             m_SorterArgs.inputValues = m_GpuSortKeys;
             m_SorterArgs.count = (uint)count;
             if (m_Sorter.Valid)
                 m_SorterArgs.resources = GpuSorting.SupportResources.Load((uint)count);
+            
+            m_SorterArgs.resources.Dispose();
         }
 
         bool resourcesAreSetUp => m_ShaderSplats != null && m_ShaderComposite != null && m_ShaderDebugPoints != null &&
@@ -543,6 +566,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatDeletedBits, m_GpuEditDeleted ?? m_GpuPosData);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatViewData, m_GpuView);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.OrderBuffer, m_GpuSortKeys);
+            
 
             cmb.SetComputeIntParam(cs, Props.SplatBitsValid, m_GpuEditSelected != null && m_GpuEditDeleted != null ? 1 : 0);
             uint format = (uint)m_Asset.posFormat | ((uint)m_Asset.scaleFormat << 8) | ((uint)m_Asset.shFormat << 16);
@@ -601,6 +625,8 @@ namespace GaussianSplatting.Runtime
             DisposeBuffer(ref m_GpuIndexBuffer);
             DisposeBuffer(ref m_GpuSortDistances);
             DisposeBuffer(ref m_GpuSortKeys);
+            // add
+            DisposeBuffer(ref m_GpuPrevSortKeys);
 
             DisposeBuffer(ref m_GpuEditSelectedMouseDown);
             DisposeBuffer(ref m_GpuEditPosMouseDown);
@@ -679,10 +705,16 @@ namespace GaussianSplatting.Runtime
 
             // calculate distance to the camera for each splat
             cmd.BeginSample(s_ProfSort);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatSortDistances, m_GpuSortDistances);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatSortKeys, m_GpuSortKeys);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatChunks, m_GpuChunks);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatPos, m_GpuPosData);
+            
+            // 1) 이번 프레임 기준 거리 계산
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances,
+                GaussianSplatRenderer.Props.SplatSortDistances, m_GpuSortDistances);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances,
+                GaussianSplatRenderer.Props.SplatSortKeys, m_GpuSortKeys);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances,
+                GaussianSplatRenderer.Props.SplatChunks, m_GpuChunks);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances,
+                GaussianSplatRenderer.Props.SplatPos, m_GpuPosData);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatFormat, (int)m_Asset.posFormat);
             cmd.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMV, worldToCamMatrix * matrix);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatCount, m_SplatCount);
@@ -690,10 +722,42 @@ namespace GaussianSplatting.Runtime
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcDistances, out uint gsX, out _, out _);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, (m_GpuSortDistances.count + (int)gsX - 1)/(int)gsX, 1, 1);
 
-            // sort the splats
+            
+            // 2) 이전 정렬 결과와 현재 키 버퍼를 스왑 
+            // PrevSortKeys: 이전 프레임 순서
+            // Splatsortkeys: 이번 프레임에 쓸 결과 버퍼 
+            var tmp = m_GpuPrevSortKeys;
+            m_GpuPrevSortKeys = m_GpuSortKeys;
+            m_GpuSortKeys = tmp;
+            
+            // 3) Local resorting window 커널 호출
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.LocalResortWindow,
+                Props.SplatSortDistances, m_GpuSortDistances);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.LocalResortWindow,
+                Props.SplatSortKeys, m_GpuSortKeys);
+
+            // 이전 프레임 정렬 순서 버퍼
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.LocalResortWindow,
+                Props.PrevOrderBuffer, m_GpuPrevSortKeys);
+
+            // 공통 파라미터
+            cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatCount, m_SplatCount);
+            cmd.SetComputeIntParam(m_CSSplatUtilities, Props.LocalWindowSize, m_LocalWindowSize);
+
+            m_CSSplatUtilities.GetKernelThreadGroupSizes(
+                (int)KernelIndices.LocalResortWindow, out uint gsX2, out _, out _);
+
+            cmd.DispatchCompute(
+                m_CSSplatUtilities,
+                (int)KernelIndices.LocalResortWindow,
+                (m_SplatCount + (int)gsX2 - 1) / (int)gsX2, 1, 1);
+
+            
+            // 4) 나머지는 기존 GPU 소터로 글로벌 정렬
             EnsureSorterAndRegister();
             m_Sorter.Dispatch(cmd, m_SorterArgs);
             cmd.EndSample(s_ProfSort);
+            
         }
 
         public void Update()

@@ -16,6 +16,10 @@
 #pragma kernel CSScaleSelection
 #pragma kernel CSExportData
 #pragma kernel CSCopySplats
+#pragma kernel InitDeviceRadixSort
+#pragma kernel Upsweep
+#pragma kernel Scan
+#pragma kernel Downsweep
 
 // DeviceRadixSort
 #pragma multi_compile __ KEY_UINT KEY_INT KEY_FLOAT
@@ -23,10 +27,6 @@
 #pragma multi_compile __ SHOULD_ASCEND
 #pragma multi_compile __ SORT_PAIRS
 #pragma multi_compile __ VULKAN
-#pragma kernel InitDeviceRadixSort
-#pragma kernel Upsweep
-#pragma kernel Scan
-#pragma kernel Downsweep
 
 // GPU sorting needs wave ops
 #pragma require wavebasic
@@ -47,6 +47,14 @@ int _SelectionMode;
 RWStructuredBuffer<uint> _SplatSortDistances;
 RWStructuredBuffer<uint> _SplatSortKeys;
 uint _SplatCount;
+
+// Local resorting 용 버퍼들
+RWStructuredBuffer<uint> _SplatSortKeys;
+StructuredBuffer<uint>   _PrevOrderBuffer;
+StructuredBuffer<float>  _SplatSortDistances;
+uint _SplatCount;
+uint _LocalWindowSize = 15; 
+
 
 // radix sort etc. friendly, see http://stereopsis.com/radix.html
 uint FloatToSortableUint(float f)
@@ -104,6 +112,15 @@ StructuredBuffer<GaussianCutoutShaderData> _SplatCutouts;
 RWByteAddressBuffer _SplatSelectedBits;
 ByteAddressBuffer _SplatDeletedBits;
 uint _SplatBitsValid;
+
+void LocalResortWindow(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _SplatCount) return;
+
+    // 나중에 여기서 window 기반으로 재정렬하면 됨
+    _SplatSortKeys[i] = _PrevOrderBuffer[i];
+}
 
 void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
 {

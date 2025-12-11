@@ -20,12 +20,15 @@ namespace GaussianSplatting.Runtime
         [SerializeField] Vector3 m_BoundsMin;
         [SerializeField] Vector3 m_BoundsMax;
         [SerializeField] Hash128 m_DataHash;
+        [SerializeField] float m_LocalWindowSize;
 
         public int formatVersion => m_FormatVersion;
         public int splatCount => m_SplatCount;
         public Vector3 boundsMin => m_BoundsMin;
         public Vector3 boundsMax => m_BoundsMax;
         public Hash128 dataHash => m_DataHash;
+        public float localwindowsize => m_LocalWindowSize;
+        
 
         // Match VECTOR_FMT_* in HLSL
         public enum VectorFormat
